@@ -26,7 +26,7 @@ import {
   DollarSign,
 } from "lucide-react";
 
-const API_URL = "http://172.16.1.22";
+const API_URL = "http://172.16.1.131";
 
 const CONTENT_TYPES = [
   "Chính trị",
@@ -112,8 +112,14 @@ export default function UploadPage() {
       const file = e.target.files?.[0];
       if (file && file.type === "application/pdf") {
         setSelectedFile(file);
-        startProcessing(file);
-        handleFileUpload(file);
+        handleFileUpload(file)
+        .then(() => {
+          startProcessing(file);
+        })
+        .catch((error) => {
+          console.error('Upload failed:', error);
+        });
+
       }
     },
     [],
@@ -128,33 +134,68 @@ export default function UploadPage() {
   }, []);
 
   const startProcessing = async (file: File) => {
-    setIsProcessing(true);
+    //get metadata from AI
+     try {
+      const res = await fetch(API_URL + ':8000/books', {
+        method: 'GET'
+      });
 
+      if (!res.ok) {
+
+        throw new Error(`HTTP error! status: ${res.status}`);
+      } else {
+          const result = await res.json();
+         (window as any).responseMetadata = result; //bookId
+
+  }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      console.error('Error:', errorMessage);
+    } finally {
+
+    }
+ const metadataList = (window as any).responseMetadata;
+const bookId = (window as any).bookId;
+console.log("🔍 Tìm kiếm book_id:", bookId);
+console.log("📚 Danh sách metadata:", metadataList);
+if (Array.isArray(metadataList) && bookId) {
+  const foundBook = metadataList.find(item => item.book_id === bookId);
+
+  if (foundBook) {
+(window as any).foundBook = foundBook;
+  } else {
+    console.log("❌ Không tìm thấy book_id trùng khớp:", bookId);
+  }
+} else {
+  console.warn("⚠️  thiếu bookId");
+}
+
+
+
+    // Auto-fill form with AI data
+const foundBook = (window as any).foundBook;
+
+setBookData({
+  title: foundBook?.title ?? "Lãnh đạo Tương lai",
+  description: foundBook?.description ?? "Cuốn sách 'Lãnh đạo Tương lai' khám phá những kỹ năng và chiến lược cần thiết để trở thành một nhà lãnh đạo hiệu quả trong thế kỷ 21. Từ việc xây dựng tầm nhìn đến quản lý đội ngũ, cuốn sách cung cấp những bài học quý giá từ các nhà lãnh đạo hàng đầu thế giới.",
+  author: foundBook?.author ?? "Nguyễn Văn A, Trần Thị B",
+  year: foundBook?.year ?? "2023",
+  genres: foundBook?.genres ?? ["Kỹ năng sống", "Kinh doanh"],
+  publisher: foundBook?.publisher ?? "Nhà xuất bản",
+  pages: foundBook?.total_pages ?? 328,
+  isbn: "978-604-916-000-0",
+  contentType: foundBook?.contenttype ?? "Kỹ năng",
+  digitalPrice: "150000",
+  digitalQuantity: "1000",
+  physicalPrice: "280000",
+  physicalQuantity: "500",
+  allowPhoneAccess: true,
+  allowPhysicalAccess: true,
+});
     for (let i = 0; i < processingSteps.length; i++) {
       setProcessingStep(i);
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
-
-    // Auto-fill form with AI data
-    setBookData({
-      title: "Nghệ Thuật Lãnh Đạo Hiện Đại",
-      description:
-        "Cuốn sách cung cấp những phương pháp lãnh đạo tiên tiến, kết hợp giữa tâm lý học và quản trị hiện đại để giúp các nhà lãnh đạo phát triển kỹ năng điều hành đội nhóm hiệu quả.",
-      author: "Nguyễn Văn A, Trần Thị B",
-      year: "2023",
-      genres: ["Kỹ năng sống", "Kinh doanh"],
-      publisher: "NXB Tri Thức",
-      pages: Math.floor(file.size / 50000) + 250,
-      isbn: "978-604-916-000-0",
-      contentType: "Kỹ năng",
-      digitalPrice: "150000",
-      digitalQuantity: "1000",
-      physicalPrice: "280000",
-      physicalQuantity: "500",
-      allowPhoneAccess: true,
-      allowPhysicalAccess: true,
-    });
-
     setIsProcessing(false);
     setShowForm(true);
   };
@@ -172,6 +213,7 @@ export default function UploadPage() {
   }
 
   const handleFileUpload = async (file: File) => {
+        setIsProcessing(true);
     if (file == null) {
            console.log("Uploading File:", file.name, file.size);
       return;
@@ -193,6 +235,7 @@ export default function UploadPage() {
       } else {
           const result = await res.json();
          (window as any).bookId = result.book_id; //bookId
+         console.log("📄 BookId  Response:", (window as any).bookId);
          (window as any).filename = result.filename;
       }
     } catch (err) {
@@ -201,6 +244,8 @@ export default function UploadPage() {
     } finally {
      
     }
+
+
   }
 
   const handlePublish = async () => {

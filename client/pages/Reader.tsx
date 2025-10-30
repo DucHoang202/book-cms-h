@@ -32,19 +32,22 @@ import {
 import { Link } from "react-router-dom";
 import { request } from "http";
 
-const API_URL = "http://172.16.1.22";
+const API_URL = "http://172.16.1.131";
 
 interface ChatMessage {
   id: string;
   type: "user" | "ai";
-  content: string;
+  content: string | React.ReactNode;
   pageReferences?: number[];
   timestamp: Date;
+  citations?: string[];
+        isError?: Boolean;
+
 }
 
 //Interface gửi đến API
 interface QueryRequest {
-  question: string;
+  question: string | React.ReactNode;
   book_id: string | null;
   k: number;
   target_chars: number;
@@ -100,8 +103,10 @@ let SAMPLE_MESSAGES: ChatMessage[] = [
     type: "ai",
     content:
       'Chào bạn! Tôi đã phân tích toàn bộ nội dung cuốn sách. Bạn có thể hỏi tôi bất kỳ điều gì về nội dung sách, tôi sẽ trả lời và cung cấp trích dẫn cụ thể từ các trang liên quan.',
-    timestamp: new Date()
-  
+    timestamp: new Date(),
+    citations: [],
+          isError: false
+
   },
 ];
 const emptyResponse: QueryResponse = {
@@ -174,7 +179,6 @@ const fetchBooks = async () => {
   } catch (error) {
     console.error('Error fetching books:', error);
   } finally {
-    console.log((window as any).responseBook);
     setIsLoading(false);
   }
 };
@@ -190,7 +194,8 @@ SAMPLE_MESSAGES = [
     type: "ai",
     content:
       `Chào bạn! Tôi đã phân tích toàn bộ nội dung cuốn sách ${(window as any).responseBook?.title}. Bạn có thể hỏi tôi bất kỳ điều gì về nội dung sách, tôi sẽ trả lời và cung cấp trích dẫn cụ thể từ các trang liên quan.`,
-    timestamp: new Date()
+    timestamp: new Date(),
+    isError: false
   
   },
 ];
@@ -218,7 +223,6 @@ async function searchPagesForTerm(term: string) {
 
 
       if (!viewerWindow.PDFViewerApplication) {
-        console.log("PDFViewerApplication chưa sẵn sàng, thử lại sau...");
         return;
       }
 
@@ -243,7 +247,6 @@ async function searchPagesForTermList(term: string[]): Promise<number[]> {
   const viewerWindow = iframe.contentWindow as any;
 
   if (!viewerWindow.PDFViewerApplication) {
-    console.log("PDFViewerApplication chưa sẵn sàng, thử lại sau...");
     return [];
   }
 
@@ -257,16 +260,46 @@ async function searchPagesForTermList(term: string[]): Promise<number[]> {
     const page = await pdfDocument.getPage(i);
     const textContent = await page.getTextContent();
 
-    const text = textContent.items.map((s: any) => s.str).join(" ");
+    // Sắp xếp các text items theo vị trí (y giảm dần, x tăng dần)
+    const items = textContent.items.sort((a: any, b: any) => {
+      const yDiff = b.transform[5] - a.transform[5]; // So sánh y (từ trên xuống)
+      if (Math.abs(yDiff) > 5) return yDiff > 0 ? 1 : -1; // Khác hàng
+      return a.transform[4] - b.transform[4]; // Cùng hàng, sắp xếp theo x
+    });
 
-    // ❌ Bug nhỏ: term là mảng, nhưng bạn lại gọi toLowerCase() như string
-    // ✅ Nên check từng phần tử trong mảng
+    // Ghép text với logic khoảng cách thông minh
+    let text = '';
+    let lastItem: any = null;
+
+    for (const item of items) {
+      if (!item.str) continue;
+
+      if (lastItem) {
+        const lastY = lastItem.transform[5];
+        const currentY = item.transform[5];
+        const lastX = lastItem.transform[4] + lastItem.width;
+        const currentX = item.transform[4];
+
+        // Khác hàng
+        if (Math.abs(lastY - currentY) > 5) {
+          text += '\n';
+        }
+        // Cùng hàng nhưng có khoảng cách lớn
+        else if (currentX - lastX > 10) {
+          text += ' ';
+        }
+      }
+
+      text += item.str;
+      lastItem = item;
+    }
+
+    // Tìm kiếm các term trong text
     if (term.some(t => text.toLowerCase().includes(t.toLowerCase()))) {
       results.push(i);
     }
   }
-
-  console.log(results);
+console.log("Search results for terms:", term, "=> pages:", results);
   return results;
 }
 
@@ -386,7 +419,6 @@ function splitByCau(text: string): QuizItem[] {
     result.push({ question, answers, correct });
   }
   
-  console.log(result);
   return result;
 }
 
@@ -466,7 +498,72 @@ const quizData1: QuizItem[] = [
     </div>
   );
 }
+/**
+ * @params
+ * list: mảng các câu trích dẫn đã qua splitContext
+ * @return mảng các trang đầu tiên chứa từng câu trích dẫn
+ */
+async function getCitationsList(list: string[]) {
+  const iframe = document.getElementById("pdfFrame") as HTMLIFrameElement;
+  const viewerWindow = iframe.contentWindow as any;
 
+  if (!viewerWindow?.PDFViewerApplication) {
+    console.error("PDFViewerApplication chưa sẵn sàng");
+    return [];
+  }
+
+  await viewerWindow.PDFViewerApplication.initializedPromise;
+
+  const eventBus = viewerWindow.PDFViewerApplication.eventBus;
+  const findController = viewerWindow.PDFViewerApplication.findController;
+  const citationPages: number[] = [];
+
+  for (const term of list) {
+    // Tìm kiếm từng term
+    await searchAndWaitForResult(term, eventBus, viewerWindow);
+    
+    // Lấy trang đầu tiên có kết quả từ pageMatches
+    let firstPage = -1;
+    for (let pageIndex = 0; pageIndex < findController.pageMatches.length; pageIndex++) {
+      const matches = findController.pageMatches[pageIndex];
+      if (matches && matches.length > 0) {
+        firstPage = pageIndex + 1; // +1 vì pageIndex bắt đầu từ 0
+        break;
+      }
+    }
+    
+    citationPages.push(firstPage);
+  }
+
+  return citationPages;
+}
+
+async function searchAndWaitForResult(
+  term: string,
+  eventBus: any,
+  viewerWindow: any
+): Promise<void> {
+  return new Promise((resolve) => {
+    const onUpdate = (e: any) => {
+      // e.state: 0 = không tìm thấy, 1 = tìm thấy, 2 = đang tìm, 3 = wrapped
+      if (e.state === 0 || e.state === 1) {
+        eventBus.off("updatefindcontrolstate", onUpdate);
+        resolve();
+      }
+    };
+
+    eventBus.on("updatefindcontrolstate", onUpdate);
+
+    // Gửi sự kiện tìm kiếm
+    viewerWindow.PDFViewerApplication.eventBus.dispatch("find", {
+      type: "find",
+      query: term,
+      caseSensitive: false,
+      highlightAll: true,
+      findPrevious: false,
+    });
+  });
+}
 
 
   const handleSendMessage = async () => {
@@ -477,7 +574,10 @@ const quizData1: QuizItem[] = [
       id: Date.now().toString(),
       type: "user",
       content: inputMessage,
-      timestamp: new Date()
+      timestamp: new Date(),
+      citations: [],
+      isError: false,
+
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -493,7 +593,6 @@ const quizData1: QuizItem[] = [
 
           chat.scrollTop = chat.scrollHeight;
     try {
-      console.log((window as any).bookId);
       
       const res = await fetch(API_URL + ':8000/query', {
         method: 'POST',
@@ -513,32 +612,59 @@ const quizData1: QuizItem[] = [
 
       // Split context into sentences
       (window as any).response = parseWrappedJson((window as any).data.answer);
-      console.log((window as any).response.answer);
       (window as any).responseCitationsRaw = splitContext((window as any).response.support.quote);
  
-      //Reminder: cái này phải lấy quote và trả về một array vị trí trang tương ứng.
-      const wait = await searchPagesForTermList((window as any).responseCitationsRaw);
+      const awaitCitation = await searchCitation((window as any).responseCitationsRaw);
+      (window as any).responseCitations = awaitCitation;
+      console.log("Response citations:", (window as any).responseCitations);
 
-      (window as any).pageCitations = wait;
+      //Reminder: cái này phải lấy quote và trả về một array vị trí trang tương ứng.
+      //const wait = await searchPagesForTermList((window as any).responseCitations);
+
       //(window as any).response.answer = renderForm(quizData1);
+ 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       setError('Có lỗi xảy ra khi gọi API: ' + errorMessage);
       console.error('Error:', err);
-    } finally {
+
+      //Khung chat ai sẽ hiển thị lỗi
+    // Hiển thị lỗi trong chat AI
+const aiErrorResponse: ChatMessage = {
+  id: (Date.now() + 1).toString(),
+  type: "ai",
+  content: (
+    <div>
+      ⚠️ Đã có lỗi xảy ra. Ấn để gửi lại{' '}
+      <button 
+        className="resendMessage font-normal underline text-blue-600 hover:text-blue-800 cursor-pointer"
+        onClick={() => {
+          const lastUserMessage = userMessage.content; // Tin nhắn người dùng cuối cùng
+          if (lastUserMessage) {
+            setInputMessage(lastUserMessage as string);
+          }
+        }}
+      >
+        Resend
+      </button>
+    </div>
+  ),
+  timestamp: new Date(),
+  citations: [],
+  isError: true
+};
+
+    setMessages((prev) => [...prev, aiErrorResponse]);
+    setIsLoading(false);    
+  } finally {
   
     }
- 
-   const awaitCitation = await searchCitation((window as any).responseCitationsRaw);
- (window as any).pageCitations = awaitCitation;
-    console.log(awaitCitation);
+         const waitForCitationsList = await getCitationsList((window as any).responseCitations);
+       (window as any).pageCitations = waitForCitationsList;
+      console.log("Page citations:", (window as any).pageCitations);
+   //const awaitCitation = await searchCitation((window as any).responseCitationsRaw);
+
     // Simulate AI response
-    let retrieveQuote = "";
-    if (!((window as any).response.found)) {
-        retrieveQuote = "";
-    } else {
-      retrieveQuote = (window as any).responseCitations;
-    }
     setTimeout(
       () => {
         const aiResponse: ChatMessage = {
@@ -547,11 +673,12 @@ const quizData1: QuizItem[] = [
           content: (window as any).response.answer,
           // pageReferences: Array.from({length: (window as any).responseCitations.length}, ),
           pageReferences: (window as any).pageCitations,
-          timestamp: new Date()
+          timestamp: new Date(),
+          citations: (window as any).responseCitations,
+          isError: false
         };
-        
+        console.log("AI response:", aiResponse.pageReferences);
         setMessages((prev) => [...prev, aiResponse]);
-        console.log("Ref", aiResponse.pageReferences)
         setIsLoading(false);
       
       },
@@ -559,6 +686,22 @@ const quizData1: QuizItem[] = [
     );
   };
 
+// Lỗi phản hồi AI
+function AiResponseError(error  ) {
+  return (
+    <div className="p-3 bg-red-100 border border-red-300 text-red-700 rounded">
+      {error}
+      <div
+        className="resendMessage cursor-pointer text-sm underline mt-2"
+        onClick={() => setInputMessage(String(messages.at(-1)))}
+      >
+        Resend
+      </div>
+    </div>
+  );
+}
+
+  //Tìm câu trong trích dẫn
   async function searchCitation(line) {
     const fullText = await extractText();
     const cleanText = fullText.replace(/\s+/g, ""); 
@@ -588,7 +731,6 @@ function parseWrappedJson(answerStr: string) {
 
   try {
     const parsed = JSON.parse(cleaned);
-    console.log(parsed);
     return parsed; // {found, support, answer, ...}
   } catch (err) {
     console.error("Failed to parse wrapped JSON:", err);
@@ -605,6 +747,9 @@ function parseWrappedJson(answerStr: string) {
         type: "user",
         content: question,
         timestamp: new Date(),
+            citations: [],
+                  isError: false
+
       };
 
       setMessages((prev) => [...prev, userMessage]);
@@ -620,7 +765,11 @@ function parseWrappedJson(answerStr: string) {
           content: (window as any).data.answer.answer,
           //pageReferences: (window as any).pageNumbers, 
           pageReferences: Array.from({length: (window as any).responseCitations.length }, (_, i) => i + 1), //here
-          timestamp: new Date()
+          timestamp: new Date(),
+          citations: [],
+                isError: false
+
+
         };
         
         setMessages((prev) => [...prev, aiResponse]);
@@ -842,17 +991,29 @@ function parseWrappedJson(answerStr: string) {
                 </div>
               </div>
             }
-
-            <div className="space-y-4">
+{/* Message body */}
+            <div className="space-y-4 ">
               {messages.map((message) => (
                 <div
                   key={message.id}
                   className={`flex gap-3 ${message.type === "user" ? "justify-end" : "justify-start"}`}
                 >
                   {message.type === "ai" && (
-                    <div className="w-6 h-6 bg-gradient-to-r from-purple-600 to-pink-600 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
-                      <Bot className="w-3 h-3 text-white" />
-                    </div>
+   <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-1 ${
+    message.isError 
+      ? 'bg-gradient-to-r from-red-600 to-orange-600' 
+      : 'bg-gradient-to-r from-purple-600 to-pink-600'
+  }`}>
+    {message.isError ? (
+      <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+      </svg>
+    ) : (
+      <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+        <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6z" />
+      </svg>
+    )}
+  </div>
                   )}
 
                   <div
@@ -868,9 +1029,7 @@ function parseWrappedJson(answerStr: string) {
                       <div className="whitespace-pre-wrap">
                         {message.content}
                       </div>
-                      <div className="whitespace-pre-wrap">
-                        {message.pageReferences}
-                      </div>
+        
                       {/* Tham khảo */}
                       {message.pageReferences && (
                         <div className="mt-2 pt-2 border-t border-gray-100">
@@ -879,7 +1038,7 @@ function parseWrappedJson(answerStr: string) {
                           </p>
         
                           <div className="flex flex-wrap gap-1">
-                            {(window as any).responseCitations.map(
+                            {message.citations.map(
                               (sentence: string, index: number) => (
                                 <Button
                                   key={index}
@@ -889,7 +1048,8 @@ function parseWrappedJson(answerStr: string) {
                                   onClick={() => searchPagesForTerm(sentence)}
 
                                 >
-                              {message.pageReferences[index]}</Button>
+                                {message.pageReferences[index] ? `Trang ${message.pageReferences[index]}` : 'N/A'}
+                              </Button>
                               )
                             )}
                           </div>
