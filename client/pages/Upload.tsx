@@ -26,7 +26,7 @@ import {
   DollarSign,
 } from "lucide-react";
 
-const API_URL = "http://172.16.1.131";
+const API_URL = "https://metabookbe.metapress.ai";
 
 const CONTENT_TYPES = [
   "Chính trị",
@@ -136,7 +136,7 @@ export default function UploadPage() {
   const startProcessing = async (file: File) => {
     //get metadata from AI
      try {
-      const res = await fetch(API_URL + ':8000/books', {
+      const res = await fetch(API_URL + '/books', {
         method: 'GET'
       });
 
@@ -224,7 +224,7 @@ setBookData({
       if (file) {
         formData.append('file', file);
       } 
-      const res = await fetch(API_URL + ':8000/ingest/pdf', {
+      const res = await fetch(API_URL + '/ingest/pdf', {
         method: 'POST',
         body: formData,
       });
@@ -252,7 +252,7 @@ setBookData({
     alert(`✅ Sách "${bookData.title}" đã được xuất bản thành công!`);
 
       try {
-      const res = await fetch(API_URL + ':8000/booksUpload', {
+      const res = await fetch(API_URL + '/booksUpload', {
         method: 'POST',
         headers: {
           'accept': 'application/json',

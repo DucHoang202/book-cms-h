@@ -32,7 +32,7 @@ import {
 import { Link } from "react-router-dom";
 import { request } from "http";
 
-const API_URL = "http://172.16.1.131";
+const API_URL = "https://metabookbe.metapress.ai";
 
 interface ChatMessage {
   id: string;
@@ -157,7 +157,7 @@ useEffect(() => {
 const fetchBooks = async () => {
   setIsLoading(true);
   try {
-    const res = await fetch(API_URL +':8000/books', {
+    const res = await fetch(API_URL +'/books', {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -594,7 +594,7 @@ async function searchAndWaitForResult(
           chat.scrollTop = chat.scrollHeight;
     try {
       
-      const res = await fetch(API_URL + ':8000/query', {
+      const res = await fetch(API_URL + '/query', {
         method: 'POST',
         headers: {
           'accept': 'application/json',
@@ -890,7 +890,7 @@ function parseWrappedJson(answerStr: string) {
   id="pdfFrame"
   ref={iframeRef}
   title="PDF Viewer"
-  src={`/pdfjs-build/web/viewer.html?file=${API_URL}:4000/pdf/${(window as any).responseBook?.source_pdf}`}
+  src={`/pdfjs-build/web/viewer.html?file=${API_URL}/pdf/${(window as any).responseBook?.source_pdf}`}
   width="100%"
   height="800px"
 />

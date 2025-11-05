@@ -156,7 +156,7 @@ const fetchBooks = async () => {
   setIsLoading(true);
   try {
     
-    const res = await fetch('http://172.16.1.131:8000/books', {
+    const res = await fetch('https://metabookbe.metapress.ai/books', {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
