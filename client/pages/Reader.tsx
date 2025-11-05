@@ -609,6 +609,7 @@ async function searchAndWaitForResult(
       //Get data
       (window as any).responseData = await res.json();
       (window as any).data = (window as any).responseData as QueryResponse;
+console.log((window as any).data);
 
       // Split context into sentences
       (window as any).response = parseWrappedJson((window as any).data.answer);
@@ -617,11 +618,6 @@ async function searchAndWaitForResult(
       const awaitCitation = await searchCitation((window as any).responseCitationsRaw);
       (window as any).responseCitations = awaitCitation;
       console.log("Response citations:", (window as any).responseCitations);
-
-      //Reminder: cái này phải lấy quote và trả về một array vị trí trang tương ứng.
-      //const wait = await searchPagesForTermList((window as any).responseCitations);
-
-      //(window as any).response.answer = renderForm(quizData1);
  
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
