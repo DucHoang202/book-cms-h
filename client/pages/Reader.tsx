@@ -299,7 +299,6 @@ async function searchPagesForTermList(term: string[]): Promise<number[]> {
       results.push(i);
     }
   }
-console.log("Search results for terms:", term, "=> pages:", results);
   return results;
 }
 
@@ -609,7 +608,7 @@ async function searchAndWaitForResult(
       //Get data
       (window as any).responseData = await res.json();
       (window as any).data = (window as any).responseData as QueryResponse;
-console.log((window as any).data);
+console.log("data", (window as any).data);
 
       // Split context into sentences
       (window as any).response = parseWrappedJson((window as any).data.answer);
@@ -617,7 +616,6 @@ console.log((window as any).data);
  
       const awaitCitation = await searchCitation((window as any).responseCitationsRaw);
       (window as any).responseCitations = awaitCitation;
-      console.log("Response citations:", (window as any).responseCitations);
  
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -673,7 +671,6 @@ const aiErrorResponse: ChatMessage = {
           citations: (window as any).responseCitations,
           isError: false
         };
-        console.log("AI response:", aiResponse.pageReferences);
         setMessages((prev) => [...prev, aiResponse]);
         setIsLoading(false);
       
